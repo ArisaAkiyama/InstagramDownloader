@@ -1,11 +1,14 @@
 /**
  * Express Server for Instagram Downloader API
+ * Handles Post and Reels downloads
+ * Stories are handled by browser extension content script
  */
 
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { scrapeInstagramPost, isValidInstagramUrl } = require('./scraper');
 
 const app = express();
@@ -130,7 +133,7 @@ app.get('/api/health', (req, res) => {
  * Body: { url, filename, type, username }
  * 
  * NOTE: File disimpan ke folder "Downloads/Instagram/username".
- * Untuk mengubah lokasi, edit variabel DOWNLOAD_FOLDER di bawah.
+ * Untuk mengubah lokasi, set environment variable DOWNLOAD_PATH.
  */
 const DOWNLOAD_FOLDER = process.env.DOWNLOAD_PATH || path.join(require('os').homedir(), 'Downloads', 'Instagram');
 
@@ -145,9 +148,6 @@ app.post('/api/save', async (req, res) => {
             });
         }
 
-        // Pastikan folder ada
-        const fs = require('fs');
-
         // Buat subfolder berdasarkan username
         const safeUsername = (username || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_');
         const userFolder = path.join(DOWNLOAD_FOLDER, safeUsername);
@@ -158,6 +158,7 @@ app.post('/api/save', async (req, res) => {
         }
 
         // Download file
+        const fetch = (await import('node-fetch')).default;
         const response = await fetch(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

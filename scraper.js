@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Instagram Scraper - Post and Reel Support
  * Supports: Posts, Carousels, and Reels
  */
@@ -154,7 +154,23 @@ async function scrapeInstagramPost(url) {
 
         // Extract username from page - get POST OWNER, not commenters
         const username = await page.evaluate(() => {
-            // Method 1: From article header link (most visible/reliable)
+            const html = document.documentElement.innerHTML;
+
+            // Method 1: From owner.username in JSON (most reliable)
+            const ownerPatterns = [
+                /"owner"\s*:\s*\{[^}]*"username"\s*:\s*"([^"]+)"/,
+                /"user"\s*:\s*\{[^}]*"username"\s*:\s*"([^"]+)"/,
+                /"author"\s*:\s*\{[^}]*"username"\s*:\s*"([^"]+)"/
+            ];
+
+            for (const pattern of ownerPatterns) {
+                const match = html.match(pattern);
+                if (match && match[1] && match[1].length > 1) {
+                    return match[1];
+                }
+            }
+
+            // Method 2: From article header link
             const headerLink = document.querySelector('article header a[href^="/"]');
             if (headerLink) {
                 const href = headerLink.getAttribute('href');
@@ -164,23 +180,38 @@ async function scrapeInstagramPost(url) {
                 }
             }
 
-            // Method 2: From page title
+            // Method 3: From first username link in article
+            const usernameLinks = document.querySelectorAll('article a[href^="/"]');
+            for (const link of usernameLinks) {
+                const href = link.getAttribute('href');
+                if (href && href.match(/^\/[a-zA-Z0-9_.]+\/?$/) && !href.includes('/p/') && !href.includes('/reel/')) {
+                    const name = href.replace(/\//g, '');
+                    if (name && name.length > 1 && !['explore', 'reels', 'stories'].includes(name)) {
+                        return name;
+                    }
+                }
+            }
+
+            // Method 4: From page title (@username pattern)
             const title = document.title;
             const titleMatch = title.match(/@([a-zA-Z0-9_.]+)/);
             if (titleMatch && titleMatch[1]) return titleMatch[1];
 
-            // Method 3: From og:title meta
-            const ogTitle = document.querySelector('meta[property="og:title"]');
-            if (ogTitle) {
-                const content = ogTitle.getAttribute('content');
+            // Method 5: From og:title or twitter:title meta
+            const metaTags = document.querySelectorAll('meta[property="og:title"], meta[name="twitter:title"]');
+            for (const meta of metaTags) {
+                const content = meta.getAttribute('content');
                 const match = content?.match(/@([a-zA-Z0-9_.]+)/);
                 if (match && match[1]) return match[1];
             }
 
-            // Method 4: From HTML - owner object specifically
-            const html = document.documentElement.innerHTML;
-            const ownerMatch = html.match(/"owner"\s*:\s*\{\s*"id"\s*:\s*"[^"]+"\s*,\s*"username"\s*:\s*"([^"]+)"/);
-            if (ownerMatch && ownerMatch[1]) return ownerMatch[1];
+            // Method 6: Search for username pattern in visible text
+            const usernamePattern = /"username"\s*:\s*"([a-zA-Z0-9_.]+)"/g;
+            const matches = [...html.matchAll(usernamePattern)];
+            if (matches.length > 0) {
+                // Return the first username found (usually the post owner)
+                return matches[0][1];
+            }
 
             return 'unknown';
         });
@@ -412,267 +443,7 @@ async function scrapeInstagramPost(url) {
     }
 }
 
-/**
- * Check if URL is a story URL
- */
-function isStoryUrl(url) {
-    return /instagram\.com\/stories\/[^\/]+\/\d+/i.test(url);
-}
-
-/**
- * Extract username and story ID from story URL
- */
-function extractStoryInfo(url) {
-    const match = url.match(/instagram\.com\/stories\/([^\/]+)\/(\d+)/);
-    if (match) {
-        return { username: match[1], storyId: match[2] };
-    }
-    return null;
-}
-
-/**
- * Scrape Instagram Story using Puppeteer with Network Interception
- */
-async function scrapeInstagramStory(url) {
-    if (!isStoryUrl(url)) {
-        return { success: false, error: 'Invalid story URL', code: 'INVALID_URL' };
-    }
-
-    const storyInfo = extractStoryInfo(url);
-    if (!storyInfo) {
-        return { success: false, error: 'Could not parse story URL', code: 'INVALID_URL' };
-    }
-
-    console.log('Processing story:', storyInfo.username, storyInfo.storyId);
-
-    let browser = null;
-    const capturedMedia = [];
-
-    try {
-        browser = await puppeteer.launch({
-            headless: HEADLESS ? 'new' : false,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--window-size=1920,1080',
-                '--disable-blink-features=AutomationControlled'
-            ],
-            defaultViewport: { width: 1920, height: 1080 }
-        });
-
-        const page = await browser.newPage();
-
-        await page.setUserAgent(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        );
-
-        // Load cookies - REQUIRED for stories
-        const cookies = loadCookies();
-        if (cookies.length > 0) {
-            await page.setCookie(...cookies);
-            console.log('Cookies loaded for story access');
-        } else {
-            console.log('Warning: No cookies - stories may not load');
-        }
-
-        // Set up network interception to capture media URLs
-        await page.setRequestInterception(true);
-
-        page.on('request', request => {
-            request.continue();
-        });
-
-        page.on('response', async response => {
-            const url = response.url();
-            const contentType = response.headers()['content-type'] || '';
-
-            // ===== VIDEO DETECTION =====
-            // Instagram story videos come from fbcdn.net with .mp4 extension OR video content-type
-            const isVideo = (
-                url.includes('.mp4') ||
-                contentType.includes('video/mp4') ||
-                contentType.includes('video/')
-            );
-            const isFromCDN = (
-                url.includes('fbcdn.net') ||
-                url.includes('cdninstagram') ||
-                url.includes('instagram.com')
-            );
-
-            if (isVideo && isFromCDN && url.length > 100) {
-                console.log('🎬 Video URL detected:', url.substring(0, 150));
-                if (!capturedMedia.some(m => m.url === url)) {
-                    capturedMedia.push({ type: 'video', url });
-                    console.log('✅ Captured VIDEO!');
-                }
-            }
-
-            // ===== IMAGE DETECTION =====
-            // Real story images from scontent domain with /v/t51 or /v/t39 path
-            if (contentType.includes('image/')) {
-                // Allowed domains for real content
-                const isFromScontent = url.includes('scontent');
-                const isFromFbcdn = url.includes('fbcdn.net') && url.includes('/v/');
-
-                // Story content path pattern
-                const hasStoryPath =
-                    url.includes('/v/t51') ||
-                    url.includes('/v/t39') ||
-                    url.includes('/v/t1.');
-
-                // Block patterns - static resources, logos, thumbnails
-                const isBlocked =
-                    url.includes('rsrc.php') ||
-                    url.includes('/rsrc') ||
-                    url.includes('static.') ||
-                    url.includes('44x44') ||
-                    url.includes('150x150') ||
-                    url.includes('profile_pic') ||
-                    url.includes('s150x') ||
-                    url.includes('s320x') ||
-                    url.length < 150;
-
-                if ((isFromScontent || isFromFbcdn) && hasStoryPath && !isBlocked) {
-                    if (!capturedMedia.some(m => m.url === url)) {
-                        capturedMedia.push({ type: 'image', url });
-                        console.log('✅ Captured IMAGE:', url.substring(0, 120) + '...');
-                    }
-                }
-            }
-        });
-
-        // Navigate to story
-        console.log('Loading story:', url);
-
-        await page.goto(url, {
-            waitUntil: 'networkidle2',
-            timeout: TIMEOUT
-        });
-
-        await delay(3000);
-
-        // Note: We skip login check here because network interception may have
-        // already captured media even if the page shows a login prompt
-
-        // Also try to extract from page source
-        const extractedMedia = await page.evaluate(() => {
-            const html = document.documentElement.innerHTML;
-            const results = [];
-            const seenUrls = new Set();
-
-            const decode = (url) => {
-                if (!url) return url;
-                return url.replace(/\\u0026/g, '&').replace(/\\\//g, '/').replace(/\\/g, '');
-            };
-
-            const add = (type, url) => {
-                url = decode(url);
-                if (url && !seenUrls.has(url) && !url.includes('profile_pic')) {
-                    seenUrls.add(url);
-                    results.push({ type, url });
-                }
-            };
-
-            // Video patterns
-            const videoPatterns = [
-                /"video_url"\s*:\s*"(https?:[^"]+)"/g,
-                /"playback_url"\s*:\s*"(https?:[^"]+)"/g
-            ];
-
-            for (const pattern of videoPatterns) {
-                let match;
-                while ((match = pattern.exec(html)) !== null) {
-                    if (match[1]) add('video', match[1]);
-                }
-            }
-
-            // Image patterns
-            const imagePatterns = [
-                /"display_url"\s*:\s*"(https?:[^"]+)"/g
-            ];
-
-            for (const pattern of imagePatterns) {
-                let match;
-                while ((match = pattern.exec(html)) !== null) {
-                    const url = match[1];
-                    if (url && !url.includes('150x150') && !url.includes('320x320')) {
-                        add('image', url);
-                    }
-                }
-            }
-
-            return results;
-        });
-
-        // Merge captured media
-        for (const m of extractedMedia) {
-            if (!capturedMedia.some(existing => existing.url === m.url)) {
-                capturedMedia.push(m);
-            }
-        }
-
-        await browser.close();
-
-        if (capturedMedia.length === 0) {
-            return {
-                success: false,
-                error: 'No media found. Story may require login or has expired.',
-                code: 'NO_MEDIA'
-            };
-        }
-
-        // Filter out thumbnails and small images
-        const filteredMedia = capturedMedia.filter(m => {
-            const url = m.url.toLowerCase();
-            return !url.includes('150x150') &&
-                !url.includes('44x44') &&
-                !url.includes('s150x') &&
-                !url.includes('s320x') &&
-                !url.includes('_s.jpg') &&
-                !url.includes('profile');
-        });
-
-        // Prioritize video over image
-        const videos = filteredMedia.filter(m => m.type === 'video');
-        let images = filteredMedia.filter(m => m.type === 'image');
-
-        // Sort images by likely quality (larger dimension indicators first)
-        images.sort((a, b) => {
-            const aHas1080 = a.url.includes('1080') ? 1 : 0;
-            const bHas1080 = b.url.includes('1080') ? 1 : 0;
-            return bHas1080 - aHas1080;
-        });
-
-        console.log(`Found ${videos.length} videos, ${images.length} images after filtering`);
-
-        // Return the best media (prefer video, then largest image)
-        const finalMedia = videos.length > 0 ? [videos[0]] : (images.length > 0 ? [images[0]] : []);
-
-        if (finalMedia.length === 0) {
-            return {
-                success: false,
-                error: 'No usable media found.',
-                code: 'NO_MEDIA'
-            };
-        }
-
-        console.log(`Story scraped successfully: ${finalMedia[0].type}`);
-
-        return {
-            success: true,
-            media: finalMedia,
-            username: storyInfo.username,
-            storyId: storyInfo.storyId,
-            count: finalMedia.length
-        };
-
-    } catch (error) {
-        console.error('Story error:', error.message);
-        if (browser) await browser.close();
-        return { success: false, error: error.message, code: 'ERROR' };
-    }
-}
-
-module.exports = { scrapeInstagramPost, isValidInstagramUrl };
-
+module.exports = {
+    scrapeInstagramPost,
+    isValidInstagramUrl
+};

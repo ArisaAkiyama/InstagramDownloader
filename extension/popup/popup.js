@@ -41,6 +41,119 @@ async function init() {
     });
 
     await loadState();
+
+    // Check if background is still processing
+    const bgState = await checkBackgroundState();
+
+    // Always check clipboard for new URL - even if old results exist
+    await checkClipboardAndAutoDownload(bgState);
+}
+
+/**
+ * Check clipboard for Instagram URL and auto-download
+ */
+async function checkClipboardAndAutoDownload(hasExistingState) {
+    try {
+        const clipText = await navigator.clipboard.readText();
+
+        if (clipText && isInstagramUrl(clipText)) {
+            // Clean the URL (remove query params for comparison)
+            const cleanClipUrl = clipText.split('?')[0];
+            const cleanCurrentUrl = urlInput.value.trim().split('?')[0];
+
+            // Check if clipboard URL is different from current/displayed URL
+            if (cleanClipUrl !== cleanCurrentUrl) {
+                console.log('Auto-download from clipboard:', clipText);
+
+                // Clear old results if any
+                if (hasExistingState) {
+                    await chrome.runtime.sendMessage({ action: 'clearState' });
+                    resultsSection.classList.add('hidden');
+                    currentMedia = [];
+                }
+
+                urlInput.value = clipText;
+
+                // Small delay then auto-download
+                setTimeout(() => handleDownload(), 300);
+            }
+        }
+    } catch (e) {
+        // Clipboard access denied or empty - ignore
+        console.log('Clipboard access:', e.message);
+    }
+}
+
+/**
+ * Check if text is valid Instagram URL
+ */
+function isInstagramUrl(text) {
+    return /instagram\.com\/(p|reel|tv|stories)\/[\w-]+/i.test(text);
+}
+
+/**
+ * Check background service worker state
+ */
+async function checkBackgroundState() {
+    try {
+        const state = await chrome.runtime.sendMessage({ action: 'getState' });
+
+        if (state.isProcessing) {
+            // Still processing - show loading and poll for updates
+            showLoading();
+            downloadBtn.disabled = true;
+            urlInput.value = state.url || '';
+            pollBackgroundState();
+            return true; // Handled - still processing
+        } else if (state.media && state.media.length > 0) {
+            // Processing complete - show results
+            currentMedia = state.media;
+            currentUsername = state.username || 'unknown';
+            urlInput.value = state.url || '';
+            showResults(state.media, currentUsername);
+            return true; // Handled - has results
+        } else if (state.error) {
+            // Error occurred
+            urlInput.value = state.url || '';
+            showError(state.error);
+            return true; // Handled - has error
+        }
+    } catch (e) {
+        console.log('No background state');
+    }
+    return false; // Not handled - ready for auto-download
+}
+
+/**
+ * Poll background state while processing
+ */
+function pollBackgroundState() {
+    const interval = setInterval(async () => {
+        try {
+            const state = await chrome.runtime.sendMessage({ action: 'getState' });
+
+            if (!state.isProcessing) {
+                clearInterval(interval);
+
+                if (state.media && state.media.length > 0) {
+                    currentMedia = state.media;
+                    currentUsername = state.username || 'unknown';
+                    showResults(state.media, currentUsername);
+                    saveState();
+
+                    // Show red badge with count
+                    chrome.action.setBadgeText({ text: String(state.media.length) });
+                    chrome.action.setBadgeBackgroundColor({ color: '#FF3B30' });
+                } else if (state.error) {
+                    showError(state.error);
+                }
+
+                downloadBtn.disabled = false;
+            }
+        } catch (e) {
+            clearInterval(interval);
+        }
+    }, 1000);
 }
 
 async function loadState() {
@@ -86,6 +199,67 @@ async function handlePaste() {
     }
 }
 
+/**
+ * Capture story from active browser tab using content script
+ */
+async function captureStoryFromTab(storyUrl) {
+    try {
+        // Get all tabs
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+        if (tabs.length === 0) {
+            return { success: false, error: 'No active tab found' };
+        }
+
+        let tab = tabs[0];
+        const currentUrl = tab.url || '';
+
+        // Check if current tab is the story page
+        const isOnStoryPage = currentUrl.includes('instagram.com/stories/');
+
+        if (!isOnStoryPage) {
+            // Not on story page - need to open it
+            // First check if story URL matches input
+            const inputUrl = storyUrl;
+
+            // Open story URL in current tab
+            await chrome.tabs.update(tab.id, { url: inputUrl });
+
+            // Wait for page to load
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Re-query the tab
+            [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        }
+
+        // Inject content script if not already present
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content/story-capture.js']
+            });
+        } catch (e) {
+            console.log('Content script may already be injected:', e.message);
+        }
+
+        // Wait a bit for script to initialize
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Send message to content script
+        const result = await chrome.tabs.sendMessage(tab.id, { action: 'captureStory' });
+
+        return result || { success: false, error: 'No response from content script' };
+
+    } catch (error) {
+        console.error('captureStoryFromTab error:', error);
+        return {
+            success: false,
+            error: error.message || 'Failed to capture story',
+            hint: 'Pastikan Anda sudah membuka story di browser dan masih login'
+        };
+    }
+}
+
 async function handleDownload() {
     const url = urlInput.value.trim();
 
@@ -94,7 +268,11 @@ async function handleDownload() {
         return;
     }
 
-    if (!/instagram\.com\/(p|reel|tv)\/[\w-]+/i.test(url)) {
+    // Detect URL type
+    const isStory = /instagram\.com\/stories\/[^\/]+/i.test(url);
+    const isPost = /instagram\.com\/(p|reel|tv)\/[\w-]+/i.test(url);
+
+    if (!isStory && !isPost) {
         showToast('URL tidak valid!');
         return;
     }
@@ -103,21 +281,40 @@ async function handleDownload() {
     downloadBtn.disabled = true;
 
     try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
+        let data;
 
-        const data = await response.json();
+        if (isStory) {
+            // Use content script for stories - capture from browser directly
+            console.log('Using content script for story capture...');
+            data = await captureStoryFromTab(url);
 
-        if (data.success && data.media?.length > 0) {
-            currentMedia = data.media;
-            currentUsername = data.username || 'unknown';
-            showResults(data.media, currentUsername);
-            saveState();
+            // Stories are processed directly, show results immediately
+            if (data.success && data.media?.length > 0) {
+                currentMedia = data.media;
+                currentUsername = data.username || 'unknown';
+                showResults(data.media, currentUsername);
+                saveState();
+
+                // Show red badge with count
+                chrome.action.setBadgeText({ text: String(data.media.length) });
+                chrome.action.setBadgeBackgroundColor({ color: '#FF3B30' });
+            } else {
+                throw new Error(data.error || 'Media tidak ditemukan');
+            }
         } else {
-            throw new Error(data.error || 'Media tidak ditemukan');
+            // Use background service worker for posts/reels
+            // This allows closing popup without interrupting download
+            console.log('Using background service worker for download...');
+
+            // Clear previous state
+            await chrome.runtime.sendMessage({ action: 'clearState' });
+
+            // Start download in background
+            await chrome.runtime.sendMessage({ action: 'startDownload', url });
+
+            // Poll for results
+            pollBackgroundState();
+            return; // Don't disable button, polling will handle it
         }
     } catch (error) {
         if (error.message.includes('fetch')) {
@@ -125,7 +322,6 @@ async function handleDownload() {
         } else {
             showError(error.message);
         }
-    } finally {
         downloadBtn.disabled = false;
     }
 }
