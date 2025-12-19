@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "InstaDown - Instagram Downloader",
-    "version": "2.2.0",
-    "description": "Download photos and videos from Instagram posts, reels, and stories.",
+    "version": "2.3.0",
+    "description": "Download photos and videos from Instagram posts, reels, stories, and private accounts.",
     "author": "ArisaAkiyama",
     "action": {
         "default_popup": "popup/popup.html",
@@ -18,7 +18,8 @@
         "activeTab",
         "storage",
         "scripting",
-        "clipboardRead"
+        "clipboardRead",
+        "cookies"
     ],
     "host_permissions": [
         "http://localhost:3000/*",

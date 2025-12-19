@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InstaDown Settings</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="settings.css">
+</head>
+
+<body>
+    <div class="container settings-container">
+        <!-- Header -->
+        <header class="header">
+            <button id="backBtn" class="back-btn" title="Back">←</button>
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="none" width="24" height="24">
+                    <rect x="2" y="2" width="20" height="20" rx="5" stroke="white" stroke-width="2" />
+                    <circle cx="12" cy="12" r="4" stroke="white" stroke-width="2" />
+                    <circle cx="18" cy="6" r="1.5" fill="white" />
+                </svg>
+                <span>Settings</span>
+            </div>
+        </header>
+
+        <!-- Settings Sections -->
+        <div class="settings-content">
+
+            <!-- Download Settings -->
+            <section class="settings-section">
+                <h3 class="section-title">📥 Download</h3>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label for="autoDownload">Auto-download dari clipboard</label>
+                        <p class="setting-desc">Otomatis download saat copy link Instagram</p>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="autoDownload">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label for="autoSave">Auto-save ke folder</label>
+                        <p class="setting-desc">Langsung simpan tanpa preview</p>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="autoSave">
+                    </label>
+                </div>
+
+                <div class="setting-item column">
+                    <label for="downloadPath">📂 Lokasi Penyimpanan</label>
+                    <input type="text" id="downloadPath" class="setting-input" placeholder="Kosongkan untuk default">
+                    <p class="setting-desc">Contoh: D:\Instagram atau C:\Downloads\IG (kosongkan untuk default)</p>
+                </div>
+            </section>
+
+            <!-- Account / Login -->
+            <section class="settings-section">
+                <h3 class="section-title">🔐 Akun Instagram</h3>
+
+                <div class="setting-item column">
+                    <div class="login-status" id="loginStatus">
+                        <span class="status-icon" id="statusIcon">⏳</span>
+                        <span class="status-text" id="statusText">Checking...</span>
+                    </div>
+                    <p class="setting-desc">Status login untuk akses private posts</p>
+                </div>
+
+                <div class="setting-item column">
+                    <button id="importCookiesBtn" class="action-btn primary">
+                        🍪 Import Cookies dari Browser
+                    </button>
+                    <p class="setting-desc">Login ke Instagram di browser, lalu klik tombol ini</p>
+                </div>
+            </section>
+
+            <!-- Server Settings -->
+            <section class="settings-section">
+                <h3 class="section-title">🖥️ Server</h3>
+
+                <div class="setting-item column">
+                    <label for="serverUrl">Server URL</label>
+                    <input type="url" id="serverUrl" class="setting-input" placeholder="http://localhost:3000">
+                    <p class="setting-desc">URL server InstaDown</p>
+                </div>
+            </section>
+
+            <!-- Appearance -->
+            <section class="settings-section">
+                <h3 class="section-title">🎨 Tampilan</h3>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label for="showBadge">Tampilkan badge</label>
+                        <p class="setting-desc">Badge merah saat download selesai</p>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="showBadge" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label for="showToast">Notifikasi toast</label>
+                        <p class="setting-desc">Pesan pop-up saat download</p>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="showToast" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </section>
+
+            <!-- Actions -->
+            <section class="settings-section">
+                <h3 class="section-title">⚙️ Aksi</h3>
+
+                <div class="setting-actions">
+                    <button id="clearCacheBtn" class="action-btn">🗑️ Hapus Cache</button>
+                    <button id="resetBtn" class="action-btn danger">↩️ Reset Default</button>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Save Button -->
+        <div class="settings-footer">
+            <button id="saveBtn" class="save-btn">💾 Simpan Pengaturan</button>
+        </div>
+
+        <!-- Toast -->
+        <div id="toast" class="toast hidden">
+            <span id="toastMessage"></span>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>InstaDown v2.3.0</p>
+        </footer>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+
+</html>

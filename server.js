@@ -28,6 +28,82 @@ app.use((req, res, next) => {
     next();
 });
 
+// Cookie file path
+const COOKIES_PATH = path.join(__dirname, 'cookies.json');
+
+/**
+ * API Endpoint: Set Instagram Cookies
+ * POST /api/set-cookies
+ * Body: { cookies: [...] }
+ */
+app.post('/api/set-cookies', async (req, res) => {
+    try {
+        const { cookies } = req.body;
+
+        if (!cookies || !Array.isArray(cookies)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Cookies array diperlukan'
+            });
+        }
+
+        // Validate sessionid exists
+        const sessionCookie = cookies.find(c => c.name === 'sessionid');
+        if (!sessionCookie || !sessionCookie.value) {
+            return res.status(400).json({
+                success: false,
+                error: 'Session cookie tidak ditemukan'
+            });
+        }
+
+        // Save cookies to file
+        fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+
+        console.log(`🍪 Cookies saved: ${cookies.length} cookies`);
+
+        res.json({
+            success: true,
+            message: 'Cookies saved successfully',
+            count: cookies.length
+        });
+
+    } catch (error) {
+        console.error('Set cookies error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to save cookies: ' + error.message
+        });
+    }
+});
+
+/**
+ * API Endpoint: Check Cookie Status
+ * GET /api/cookie-status
+ */
+app.get('/api/cookie-status', (req, res) => {
+    try {
+        if (!fs.existsSync(COOKIES_PATH)) {
+            return res.json({ loggedIn: false, message: 'No cookies file' });
+        }
+
+        const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'));
+        const sessionCookie = cookies.find(c => c.name === 'sessionid');
+        const userCookie = cookies.find(c => c.name === 'ds_user');
+
+        if (sessionCookie && sessionCookie.value) {
+            res.json({
+                loggedIn: true,
+                username: userCookie?.value || 'unknown',
+                cookieCount: cookies.length
+            });
+        } else {
+            res.json({ loggedIn: false, message: 'No valid session' });
+        }
+    } catch (error) {
+        res.json({ loggedIn: false, error: error.message });
+    }
+});
+
 /**
  * API Endpoint: Download Instagram Media (Posts/Reels)
  * POST /api/download
@@ -116,6 +192,11 @@ app.get('/api/proxy', async (req, res) => {
     }
 });
 
+// Import browser manager for stats
+const browserManager = require('./browser-manager');
+const rateLimiter = require('./rate-limiter');
+const errorRecovery = require('./error-recovery');
+
 /**
  * Health check endpoint
  * GET /api/health
@@ -123,23 +204,26 @@ app.get('/api/proxy', async (req, res) => {
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        browser: browserManager.getStats(),
+        rateLimit: rateLimiter.getStats(),
+        errors: errorRecovery.getStats()
     });
 });
 
 /**
  * API Endpoint: Save media to local folder (organized by username)
  * POST /api/save
- * Body: { url, filename, type, username }
+ * Body: { url, filename, type, username, downloadPath }
  * 
- * NOTE: File disimpan ke folder "Downloads/Instagram/username".
- * Untuk mengubah lokasi, set environment variable DOWNLOAD_PATH.
+ * NOTE: File disimpan ke folder kustom jika downloadPath diberikan.
+ * Fallback ke "Downloads/Instagram/username" jika tidak ada.
  */
-const DOWNLOAD_FOLDER = process.env.DOWNLOAD_PATH || path.join(require('os').homedir(), 'Downloads', 'Instagram');
+const DEFAULT_DOWNLOAD_FOLDER = process.env.DOWNLOAD_PATH || path.join(require('os').homedir(), 'Downloads', 'Instagram');
 
 app.post('/api/save', async (req, res) => {
     try {
-        const { url, filename, type, username } = req.body;
+        const { url, filename, type, username, downloadPath } = req.body;
 
         if (!url || !filename) {
             return res.status(400).json({
@@ -148,13 +232,18 @@ app.post('/api/save', async (req, res) => {
             });
         }
 
+        // Use custom download path if provided, otherwise use default
+        const baseFolder = downloadPath && downloadPath.trim()
+            ? downloadPath.trim()
+            : DEFAULT_DOWNLOAD_FOLDER;
+
         // Buat subfolder berdasarkan username
         const safeUsername = (username || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_');
-        const userFolder = path.join(DOWNLOAD_FOLDER, safeUsername);
+        const userFolder = path.join(baseFolder, safeUsername);
 
         if (!fs.existsSync(userFolder)) {
             fs.mkdirSync(userFolder, { recursive: true });
-            console.log(`📁 Created folder: ${safeUsername}`);
+            console.log(`📁 Created folder: ${userFolder}`);
         }
 
         // Download file
@@ -192,6 +281,70 @@ app.post('/api/save', async (req, res) => {
             error: 'Gagal menyimpan file: ' + error.message
         });
     }
+});
+
+// Import download queue for batch operations
+const downloadQueue = require('./download-queue');
+
+/**
+ * API Endpoint: Batch download (parallel)
+ * POST /api/batch-save
+ * Body: { items: [{url, filename, type}], username }
+ */
+app.post('/api/batch-save', async (req, res) => {
+    try {
+        const { items, username, downloadPath } = req.body;
+
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Items array diperlukan'
+            });
+        }
+
+        if (!username) {
+            return res.status(400).json({
+                success: false,
+                error: 'Username diperlukan'
+            });
+        }
+
+        // Add to queue and get job ID (pass downloadPath)
+        const jobId = downloadQueue.addBatch(items, username, downloadPath);
+
+        console.log(`📦 Batch job started: ${jobId} (${items.length} items)`);
+
+        res.json({
+            success: true,
+            jobId,
+            total: items.length,
+            message: 'Download started in background'
+        });
+
+    } catch (error) {
+        console.error('Batch save error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Batch save failed: ' + error.message
+        });
+    }
+});
+
+/**
+ * API Endpoint: Check batch job status
+ * GET /api/batch-status/:jobId
+ */
+app.get('/api/batch-status/:jobId', (req, res) => {
+    const status = downloadQueue.getStatus(req.params.jobId);
+    res.json(status);
+});
+
+/**
+ * API Endpoint: Get download queue stats
+ * GET /api/queue-stats
+ */
+app.get('/api/queue-stats', (req, res) => {
+    res.json(downloadQueue.getStats());
 });
 
 // Serve index.html for root route

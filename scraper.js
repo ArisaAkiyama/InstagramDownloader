@@ -1,18 +1,45 @@
 ﻿/**
  * Instagram Scraper - Post and Reel Support
  * Supports: Posts, Carousels, and Reels
+ * Uses browser pool for faster subsequent requests
+ * Includes auto-retry, rate limiting, and error recovery
  */
 
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 const path = require('path');
-
-puppeteer.use(StealthPlugin());
+const browserManager = require('./browser-manager');
+const rateLimiter = require('./rate-limiter');
+const errorRecovery = require('./error-recovery');
 
 const COOKIES_PATH = path.join(__dirname, 'cookies.json');
 const TIMEOUT = parseInt(process.env.TIMEOUT) || 60000;
-const HEADLESS = process.env.HEADLESS !== 'false';
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000; // Base delay, increases exponentially
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function withRetry(fn, maxRetries = MAX_RETRIES, context = '') {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+
+            if (attempt < maxRetries) {
+                const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+                console.log(`⚠️ ${context} Attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+                console.log(`   Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+            }
+        }
+    }
+
+    console.log(`❌ ${context} All ${maxRetries} attempts failed`);
+    throw lastError;
+}
 
 /**
  * Validate Instagram URL (post or reel)
@@ -73,8 +100,10 @@ function decodeUrl(url) {
 
 /**
  * Main scraper function - handles posts and reels
+ * Includes auto-retry for reliability
  */
 async function scrapeInstagramPost(url) {
+    // Validate URL first (no retry needed for invalid URLs)
     if (!isValidInstagramUrl(url)) {
         return { success: false, error: 'Invalid URL. Please enter a valid Instagram post or reel URL.', code: 'INVALID_URL' };
     }
@@ -87,38 +116,36 @@ async function scrapeInstagramPost(url) {
     const isReel = isReelUrl(url);
     console.log('Processing shortcode:', shortcode, isReel ? '(REEL)' : '(POST)');
 
-    let browser = null;
+    // Use retry wrapper for the actual scraping
+    try {
+        return await withRetry(
+            () => scrapeWithPage(url, shortcode, isReel),
+            MAX_RETRIES,
+            `Scraping ${shortcode}`
+        );
+    } catch (error) {
+        console.error('❌ Final error after retries:', error.message);
+        return {
+            success: false,
+            error: error.message || 'Scraping failed after multiple attempts',
+            code: 'RETRY_EXHAUSTED'
+        };
+    }
+}
+
+/**
+ * Internal scraper function (called by retry wrapper)
+ */
+async function scrapeWithPage(url, shortcode, isReel) {
+    let page = null;
 
     try {
-        browser = await puppeteer.launch({
-            headless: HEADLESS ? 'new' : false,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-default-apps',
-                '--disable-sync',
-                '--disable-translate',
-                '--no-first-run',
-                '--window-size=1280,720',
-                '--disable-blink-features=AutomationControlled'
-            ],
-            defaultViewport: { width: 1280, height: 720 }
-        });
+        // Wait for rate limiter slot (prevents Instagram ban)
+        await rateLimiter.waitForSlot();
 
-        const page = await browser.newPage();
-
-        await page.setUserAgent(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        );
-
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-        });
+        // Get page from browser pool (fast - reuses browser)
+        page = await browserManager.getPage();
+        console.log('⚡ Got page from browser pool');
 
         // Load cookies if available
         const cookies = loadCookies();
@@ -136,6 +163,9 @@ async function scrapeInstagramPost(url) {
 
         console.log('Loading:', postUrl);
 
+        // Add small random jitter to avoid detection patterns
+        await rateLimiter.addJitter(300);
+
         await page.goto(postUrl, {
             waitUntil: 'domcontentloaded', // Faster than networkidle2
             timeout: TIMEOUT
@@ -143,13 +173,50 @@ async function scrapeInstagramPost(url) {
 
         await delay(1000); // Reduced from 3000ms
 
-        // Check for errors
+        // Check for errors (don't retry these - they're permanent)
         const pageContent = await page.content();
+
+        // Run diagnostic analysis on page
+        const pageUrl = isReel
+            ? `https://www.instagram.com/reel/${shortcode}/`
+            : `https://www.instagram.com/p/${shortcode}/`;
+        const diagnostic = errorRecovery.analyzePage(pageContent, pageUrl);
+
+        // Check for rate limiting response from Instagram
+        if (pageContent.includes('Please wait a few minutes') ||
+            pageContent.includes('Try again later') ||
+            pageContent.includes('rate limit')) {
+            console.log('🚨 Instagram rate limit detected! Triggering cooldown...');
+            rateLimiter.triggerCooldown(120000); // 2 minute cooldown
+            errorRecovery.trackError('RATE_LIMIT');
+            throw new Error('Instagram rate limit detected');
+        }
+
+        // Check for login wall
+        if (pageContent.includes('You must log in to continue') ||
+            pageContent.includes('Create an account')) {
+            console.log('🔒 Login wall detected');
+            errorRecovery.trackError('LOGIN_REQUIRED');
+            await browserManager.releasePage(page);
+            return {
+                success: false,
+                error: 'Instagram requires login. Please add valid cookies.',
+                code: 'LOGIN_REQUIRED'
+            };
+        }
 
         if (pageContent.includes('Page Not Found') ||
             pageContent.includes("Sorry, this page isn't available")) {
-            await browser.close();
+            await browserManager.releasePage(page);
+            errorRecovery.trackError('NOT_FOUND');
+            // Return directly without retry for permanent errors
             return { success: false, error: 'Post not found', code: 'NOT_FOUND' };
+        }
+
+        // If page structure seems invalid, save diagnostic
+        if (!diagnostic.structureValid) {
+            console.log('⚠️ Page structure issues detected:', diagnostic.issues);
+            await errorRecovery.saveDiagnostic(pageContent, diagnostic);
         }
 
         // Extract username from page - get POST OWNER, not commenters
@@ -338,7 +405,7 @@ async function scrapeInstagramPost(url) {
                 }
             }
 
-            await browser.close();
+            await browserManager.releasePage(page);
             return { success: true, media: finalMedia, count: finalMedia.length, username };
         }
 
@@ -423,23 +490,29 @@ async function scrapeInstagramPost(url) {
 
             if (carouselMedia.length > 0) {
                 console.log(`Found ${carouselMedia.length} media from carousel`);
-                await browser.close();
+                await browserManager.releasePage(page);
                 return { success: true, media: carouselMedia, count: carouselMedia.length, username };
             }
         }
 
-        await browser.close();
+        // No media found - save diagnostic and throw to trigger retry
+        console.log('⚠️ No media found, saving diagnostic...');
+        errorRecovery.trackError('NO_MEDIA');
 
-        return {
-            success: false,
-            error: 'Could not find media. The post may be private or unavailable.',
-            code: 'NO_MEDIA'
-        };
+        // Save diagnostic for debugging
+        const finalDiagnostic = errorRecovery.analyzePage(pageContent, pageUrl);
+        finalDiagnostic.issues.push('No media extracted after all attempts');
+        await errorRecovery.saveDiagnostic(pageContent, finalDiagnostic);
+
+        await browserManager.releasePage(page);
+        throw new Error(errorRecovery.getErrorMessage(finalDiagnostic));
 
     } catch (error) {
-        console.error('Error:', error.message);
-        if (browser) await browser.close();
-        return { success: false, error: error.message, code: 'ERROR' };
+        console.error('Scrape error:', error.message);
+        errorRecovery.trackError('SCRAPE_ERROR');
+        if (page) await browserManager.releasePage(page);
+        // Re-throw to trigger retry
+        throw error;
     }
 }
 

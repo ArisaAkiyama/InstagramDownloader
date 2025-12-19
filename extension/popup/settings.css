@@ -1,0 +1,267 @@
+/* Settings Page Styles */
+
+.settings-container {
+    min-height: 500px;
+}
+
+.back-btn {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px 10px;
+    margin-right: 8px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.back-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.settings-content {
+    padding: 10px 0;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.settings-section {
+    background: white;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+
+.section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0c4a6e;
+    margin: 0 0 10px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.setting-item:last-child {
+    border-bottom: none;
+}
+
+.setting-item.column {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.setting-info {
+    flex: 1;
+}
+
+.setting-info label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+    display: block;
+}
+
+.setting-desc {
+    font-size: 11px;
+    color: #94a3b8;
+    margin: 2px 0 0 0;
+}
+
+/* Toggle Switch */
+.toggle {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    transition: 0.3s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle input:checked+.toggle-slider {
+    background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+}
+
+.toggle input:checked+.toggle-slider:before {
+    transform: translateX(20px);
+}
+
+/* Input fields */
+.setting-input {
+    width: 100%;
+    padding: 10px 12px;
+    margin-top: 6px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #334155;
+    transition: border-color 0.2s;
+}
+
+.setting-input:focus {
+    outline: none;
+    border-color: #0ea5e9;
+}
+
+/* Action buttons */
+.setting-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.action-btn {
+    flex: 1;
+    padding: 10px;
+    border: 2px solid #e2e8f0;
+    background: white;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    border-color: #0ea5e9;
+    color: #0ea5e9;
+}
+
+.action-btn.danger {
+    border-color: #fecaca;
+    color: #ef4444;
+}
+
+.action-btn.danger:hover {
+    background: #fef2f2;
+    border-color: #ef4444;
+}
+
+/* Save button */
+.settings-footer {
+    padding: 10px 0;
+}
+
+.save-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.save-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+}
+
+.save-btn:active {
+    transform: translateY(0);
+}
+
+/* Scrollbar */
+.settings-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.settings-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+/* Login Status */
+.login-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 4px;
+}
+
+.status-icon {
+    font-size: 18px;
+}
+
+.status-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+}
+
+.login-status.logged-in {
+    background: #ecfdf5;
+}
+
+.login-status.logged-in .status-text {
+    color: #059669;
+}
+
+.login-status.logged-out {
+    background: #fef2f2;
+}
+
+.login-status.logged-out .status-text {
+    color: #dc2626;
+}
+
+/* Primary Action Button */
+.action-btn.primary {
+    background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    border: none;
+    color: white;
+    padding: 12px;
+}
+
+.action-btn.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+    color: white;
+}

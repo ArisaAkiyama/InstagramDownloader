@@ -1,0 +1,15 @@
+{
+  "url": "https://www.instagram.com/p/BzcY7fvFoGfbIwQEuIkM7MzkOU36TwCX_S-we40/",
+  "timestamp": "2025-12-19T06:47:27.928Z",
+  "patternsVersion": "2025-12-19",
+  "issues": [
+    "Only 1 post elements found (expected 2+)",
+    "No media URL patterns found in page",
+    "No media extracted after all attempts"
+  ],
+  "suggestions": [
+    "Page may not have fully loaded",
+    "Post may be private or media patterns changed"
+  ],
+  "structureValid": true
+}
