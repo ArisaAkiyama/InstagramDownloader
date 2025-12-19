@@ -3,10 +3,11 @@
  * Downloads organized by username folder
  */
 
-const API_URL = 'http://localhost:3000/api/download';
-const SAVE_URL = 'http://localhost:3000/api/save';
-const BATCH_URL = 'http://localhost:3000/api/batch-save';
-const PROXY_URL = 'http://localhost:3000/api/proxy';
+// API URLs - will be set after loading settings
+let API_URL = 'http://localhost:3000/api/download';
+let SAVE_URL = 'http://localhost:3000/api/save';
+let BATCH_URL = 'http://localhost:3000/api/batch-save';
+let PROXY_URL = 'http://localhost:3000/api/proxy';
 
 let urlInput, pasteBtn, downloadBtn, settingsBtn;
 let loadingState, errorState, resultsSection;
@@ -112,7 +113,7 @@ async function checkClipboardAndAutoDownload(hasExistingState) {
  * Check if text is valid Instagram URL
  */
 function isInstagramUrl(text) {
-    return /instagram\.com\/(p|reel|tv|stories)\/[\w-]+/i.test(text);
+    return /instagram\.com\/(p|reel|tv|stories|highlights)\/[\w-]+/i.test(text);
 }
 
 /**
@@ -440,6 +441,9 @@ function showResults(media, username) {
             thumbHtml = `
                 <div class="media-thumb-container">
                     <img class="media-thumb" src="${thumbUrl}" alt="" 
+                         data-full-url="${item.url}"
+                         data-index="${index + 1}"
+                         data-type="${isVideo ? 'Video' : 'Image'}"
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                     <div class="media-thumb-fallback" style="display:none;">📷</div>
                 </div>`;
@@ -455,6 +459,16 @@ function showResults(media, username) {
         `;
 
         div.querySelector('.item-download-btn').onclick = () => saveMedia(item, index);
+
+        // Add hover preview for images
+        const thumb = div.querySelector('.media-thumb');
+        if (thumb && !isVideo) {
+            thumb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showPreview(item.url, index + 1, 'Image');
+            });
+        }
+
         mediaList.appendChild(div);
     });
 }
@@ -673,6 +687,14 @@ async function loadAppSettings() {
     try {
         const result = await chrome.storage.sync.get('settings');
         appSettings = { ...DEFAULT_SETTINGS, ...result.settings };
+
+        // Update API URLs from settings
+        const serverUrl = appSettings.serverUrl || 'http://localhost:3000';
+        API_URL = `${serverUrl}/api/download`;
+        SAVE_URL = `${serverUrl}/api/save`;
+        BATCH_URL = `${serverUrl}/api/batch-save`;
+        PROXY_URL = `${serverUrl}/api/proxy`;
+
         console.log('Settings loaded:', appSettings);
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -685,4 +707,50 @@ async function loadAppSettings() {
  */
 function openSettings() {
     window.location.href = 'settings.html';
+}
+
+/**
+ * Show preview popup for thumbnail
+ */
+function showPreview(imageUrl, index, type) {
+    const previewPopup = document.getElementById('previewPopup');
+    const previewImage = document.getElementById('previewImage');
+    const previewInfo = document.getElementById('previewInfo');
+
+    if (!previewPopup || !previewImage) return;
+
+    // Use proxy for the full image
+    const fullUrl = `${PROXY_URL}?url=${encodeURIComponent(imageUrl)}`;
+    previewImage.src = fullUrl;
+    if (previewInfo) previewInfo.textContent = `${type} #${index}`;
+
+    previewPopup.classList.remove('hidden');
+
+    // Close on click anywhere
+    previewPopup.onclick = (e) => {
+        hidePreview();
+    };
+
+    // Close on escape key
+    document.addEventListener('keydown', handlePreviewEscape);
+}
+
+/**
+ * Hide preview popup
+ */
+function hidePreview() {
+    const previewPopup = document.getElementById('previewPopup');
+    if (previewPopup) {
+        previewPopup.classList.add('hidden');
+    }
+    document.removeEventListener('keydown', handlePreviewEscape);
+}
+
+/**
+ * Handle escape key to close preview
+ */
+function handlePreviewEscape(e) {
+    if (e.key === 'Escape') {
+        hidePreview();
+    }
 }

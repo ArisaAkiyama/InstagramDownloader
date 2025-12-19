@@ -456,3 +456,79 @@ body {
 .media-list::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
 }
+
+/* Thumbnail Preview Popup */
+.preview-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    animation: popIn 0.2s ease-out;
+}
+
+.preview-popup.hidden {
+    display: none;
+}
+
+.preview-popup img {
+    max-width: 280px;
+    max-height: 350px;
+    object-fit: contain;
+    display: block;
+}
+
+.preview-info {
+    padding: 8px 12px;
+    background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Overlay for preview */
+.preview-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+}
+
+.preview-overlay.hidden {
+    display: none;
+}
+
+/* Pop in animation */
+@keyframes popIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+/* Media item hover effect */
+.media-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.media-item {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.media-item .media-thumb {
+    cursor: zoom-in;
+}

@@ -3,8 +3,8 @@
  * Handles downloads in background so popup closing doesn't interrupt
  */
 
-const API_URL = 'http://localhost:3000/api/download';
-const SAVE_URL = 'http://localhost:3000/api/save';
+// Default server URL - will be updated from settings
+let serverUrl = 'http://localhost:3000';
 
 // Store current download state
 let downloadState = {
@@ -14,6 +14,21 @@ let downloadState = {
     username: null,
     error: null
 };
+
+/**
+ * Get server URL from settings
+ */
+async function getServerUrl() {
+    try {
+        const result = await chrome.storage.sync.get('settings');
+        if (result.settings?.serverUrl) {
+            serverUrl = result.settings.serverUrl;
+        }
+    } catch (e) {
+        console.log('[Background] Using default server URL');
+    }
+    return serverUrl;
+}
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -56,6 +71,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  */
 async function handleDownload(url) {
     console.log('[Background] Starting download for:', url);
+
+    // Get server URL from settings
+    const baseUrl = await getServerUrl();
+    const API_URL = `${baseUrl}/api/download`;
 
     downloadState = {
         isProcessing: true,
@@ -121,6 +140,10 @@ async function handleDownload(url) {
  */
 async function handleSaveMedia(items, username) {
     console.log('[Background] Saving', items.length, 'items for', username);
+
+    // Get server URL from settings
+    const baseUrl = await getServerUrl();
+    const SAVE_URL = `${baseUrl}/api/save`;
 
     let savedCount = 0;
     let errors = [];
